@@ -176,12 +176,14 @@
   const webAppUrlInput = document.getElementById('webAppUrl');
 
   let html5QrCode;
-  let webAppUrl = localStorage.getItem('attendanceWebAppUrl') || '';
+  let webAppUrl = 'https://script.google.com/macros/s/AKfycbyehd8wkqcksXknp1Ee968t0TPvrD2Yo6WPtU6qBsMmk-3ZmdNegPy82ke8littYdofTQ/exec';
   let isProcessing = false;
 
-  if (webAppUrl) {
-    webAppUrlInput.value = webAppUrl;
-  }
+ if (webAppUrl) {
+    configPanel.style.display = 'none';
+    readerWrapper.style.display = 'block';
+    startScanner();
+}
 
   saveConfigBtn.addEventListener('click', () => {
     webAppUrl = webAppUrlInput.value.trim();
