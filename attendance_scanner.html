@@ -149,7 +149,7 @@
 
 <div id="config-panel">
   <label for="webAppUrl">Apps Script Web App URL</label>
-  <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/AKfycbyehd8wkqcksXknp1Ee968t0TPvrD2Yo6WPtU6qBsMmk-3ZmdNegPy82ke8littYdofTQ/exec">
+  <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/XXXX/exec">
   <button id="saveConfigBtn">Save & Start Scanner</button>
 </div>
 
@@ -176,14 +176,14 @@
   const webAppUrlInput = document.getElementById('webAppUrl');
 
   let html5QrCode;
-  let webAppUrl = 'https://script.google.com/macros/s/AKfycbyehd8wkqcksXknp1Ee968t0TPvrD2Yo6WPtU6qBsMmk-3ZmdNegPy82ke8littYdofTQ/exec';
+  let webAppUrl = 'PASTE_YOUR_WEB_APP_URL_HERE';
   let isProcessing = false;
 
- if (webAppUrl) {
+  if (webAppUrl && webAppUrl !== 'PASTE_YOUR_WEB_APP_URL_HERE') {
     configPanel.style.display = 'none';
     readerWrapper.style.display = 'block';
     startScanner();
-}
+  }
 
   saveConfigBtn.addEventListener('click', () => {
     webAppUrl = webAppUrlInput.value.trim();
