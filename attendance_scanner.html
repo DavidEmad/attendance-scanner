@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Attendance Scanner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #1a1d24;
+    --accent: #4f8cff;
+    --green: #2fbf71;
+    --red: #e5484d;
+    --grey: #8a8f98;
+    --text: #f2f3f5;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+  }
+  h1 {
+    font-size: 1.3rem;
+    margin: 10px 0 4px;
+    text-align: center;
+  }
+  .subtitle {
+    color: var(--grey);
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  #config-panel {
+    width: 100%;
+    max-width: 420px;
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 16px;
+  }
+  #config-panel label {
+    font-size: 0.8rem;
+    color: var(--grey);
+    display: block;
+    margin-bottom: 6px;
+  }
+  #config-panel input {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: #0f1115;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  #config-panel button {
+    margin-top: 10px;
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #reader-wrapper {
+    width: 100%;
+    max-width: 420px;
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 12px;
+    display: none;
+  }
+  #reader {
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  #result-card {
+    width: 100%;
+    max-width: 420px;
+    margin-top: 16px;
+    padding: 18px;
+    border-radius: 14px;
+    background: var(--panel);
+    text-align: center;
+    display: none;
+    animation: fadeIn 0.2s ease-in;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  #result-card.present { border: 2px solid var(--green); }
+  #result-card.late { border: 2px solid var(--red); }
+  #result-card.already { border: 2px solid var(--grey); }
+  #result-card.error { border: 2px solid var(--red); }
+  #status-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 4px 12px;
+    border-radius: 999px;
+    margin-bottom: 8px;
+  }
+  #status-badge.present { background: var(--green); color: #06210f; }
+  #status-badge.late { background: var(--red); color: #2b0505; }
+  #status-badge.already { background: var(--grey); color: #14161a; }
+  #status-badge.error { background: var(--red); color: #2b0505; }
+  #result-name { font-size: 1.15rem; font-weight: 600; margin: 4px 0; }
+  #result-detail { font-size: 0.85rem; color: var(--grey); }
+  #resume-btn {
+    margin-top: 14px;
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  #start-btn {
+    margin-top: 4px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.95rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>📋 Attendance Scanner</h1>
+<div class="subtitle">Scan a student's QR code to record attendance</div>
+
+<div id="config-panel">
+  <label for="webAppUrl">Apps Script Web App URL</label>
+  <input type="text" id="webAppUrl" placeholder="https://script.google.com/macros/s/AKfycbyehd8wkqcksXknp1Ee968t0TPvrD2Yo6WPtU6qBsMmk-3ZmdNegPy82ke8littYdofTQ/exec">
+  <button id="saveConfigBtn">Save & Start Scanner</button>
+</div>
+
+<div id="reader-wrapper">
+  <div id="reader"></div>
+</div>
+
+<div id="result-card">
+  <div id="status-badge"></div>
+  <div id="result-name"></div>
+  <div id="result-detail"></div>
+  <button id="resume-btn">Scan Next</button>
+</div>
+
+<script>
+  const configPanel = document.getElementById('config-panel');
+  const readerWrapper = document.getElementById('reader-wrapper');
+  const resultCard = document.getElementById('result-card');
+  const statusBadge = document.getElementById('status-badge');
+  const resultName = document.getElementById('result-name');
+  const resultDetail = document.getElementById('result-detail');
+  const resumeBtn = document.getElementById('resume-btn');
+  const saveConfigBtn = document.getElementById('saveConfigBtn');
+  const webAppUrlInput = document.getElementById('webAppUrl');
+
+  let html5QrCode;
+  let webAppUrl = localStorage.getItem('attendanceWebAppUrl') || '';
+  let isProcessing = false;
+
+  if (webAppUrl) {
+    webAppUrlInput.value = webAppUrl;
+  }
+
+  saveConfigBtn.addEventListener('click', () => {
+    webAppUrl = webAppUrlInput.value.trim();
+    if (!webAppUrl) {
+      alert('Please paste your Apps Script Web App URL first.');
+      return;
+    }
+    localStorage.setItem('attendanceWebAppUrl', webAppUrl);
+    configPanel.style.display = 'none';
+    readerWrapper.style.display = 'block';
+    startScanner();
+  });
+
+  function startScanner() {
+    html5QrCode = new Html5Qrcode("reader");
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+    html5QrCode.start(
+      { facingMode: "environment" },
+      config,
+      onScanSuccess,
+      () => {} // ignore per-frame scan failures
+    ).catch(err => {
+      alert('Could not start camera: ' + err);
+    });
+  }
+
+  function onScanSuccess(decodedText) {
+    if (isProcessing) return; // avoid double fires on same frame
+    isProcessing = true;
+
+    html5QrCode.pause(true);
+    sendScan(decodedText);
+  }
+
+  async function sendScan(qrData) {
+    try {
+      const response = await fetch(webAppUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids CORS preflight on Apps Script
+        body: JSON.stringify({ qrData: qrData })
+      });
+      const data = await response.json();
+      showResult(data);
+    } catch (err) {
+      showResult({ success: false, message: 'Network error: ' + err.message });
+    }
+  }
+
+  function showResult(data) {
+    resultCard.style.display = 'block';
+    resultCard.className = '';
+
+    if (!data.success) {
+      resultCard.classList.add('error');
+      statusBadge.className = 'error';
+      statusBadge.textContent = 'ERROR';
+      resultName.textContent = 'Scan not recorded';
+      resultDetail.textContent = data.message;
+      return;
+    }
+
+    if (data.alreadyMarked) {
+      resultCard.classList.add('already');
+      statusBadge.className = 'already';
+      statusBadge.textContent = 'ALREADY MARKED (' + data.status + ')';
+    } else if (data.status === 'P') {
+      resultCard.classList.add('present');
+      statusBadge.className = 'present';
+      statusBadge.textContent = 'PRESENT';
+    } else if (data.status === 'L') {
+      resultCard.classList.add('late');
+      statusBadge.className = 'late';
+      statusBadge.textContent = 'LATE';
+    }
+
+    resultName.textContent = data.studentName + ' — Group ' + data.groupId;
+    resultDetail.textContent = data.message;
+  }
+
+  resumeBtn.addEventListener('click', () => {
+    resultCard.style.display = 'none';
+    isProcessing = false;
+    html5QrCode.resume();
+  });
+</script>
+
+</body>
+</html>
