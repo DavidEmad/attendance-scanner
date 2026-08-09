@@ -70,27 +70,7 @@
     width: 100%;
     border-radius: 14px;
     overflow: hidden;
-    border: 3px solid var(--border);
-    transition: border-color .1s ease, box-shadow .1s ease;
-  }
-  #reader.captured {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 4px rgba(34,197,94,0.25);
-  }
-  .flash-overlay {
-    position: fixed;
-    inset: 0;
-    background: white;
-    opacity: 0;
-    pointer-events: none;
-    z-index: 999;
-  }
-  .flash-overlay.active {
-    animation: flashAnim .25s ease-out;
-  }
-  @keyframes flashAnim {
-    0% { opacity: 0.6; }
-    100% { opacity: 0; }
+    border: 1px solid var(--border);
   }
   .result {
     margin-top: 14px;
@@ -117,7 +97,6 @@
 </style>
 </head>
 <body>
-  <div class="flash-overlay" id="flashOverlay"></div>
   <h1>📋 تسجيل حضور المحاضرات</h1>
   <div class="card">
     <div class="session-select" id="sessionSelect">
@@ -156,45 +135,13 @@
   }
 
   const resultEl = document.getElementById('result');
-  const readerEl = document.getElementById('reader');
-  const flashEl = document.getElementById('flashOverlay');
   let isProcessing = false;
   let lastScanned = null;
   let lastScanTime = 0;
-  let html5QrCode; // معرّف فوق عشان دوال الـ Capture تقدر توقف/تشغل الكاميرا
 
   function showResult(text, type) {
     resultEl.textContent = text;
     resultEl.className = 'result ' + type;
-  }
-
-  // بيب بسيط بدون أي ملف صوت خارجي، عن طريق Web Audio API
-  function playBeep() {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.type = 'sine';
-      osc.frequency.value = 880;
-      gain.gain.setValueAtTime(0.2, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.15);
-    } catch (e) { /* لو المتصفح مانع الصوت، تجاهل بهدوء */ }
-  }
-
-  // بيحصل فورًا لحظة ما الكاميرا تمسك QR - قبل حتى ما نستنى رد السيرفر
-  function captureFeedback() {
-    playBeep();
-    readerEl.classList.add('captured');
-    flashEl.classList.add('active');
-    if (navigator.vibrate) navigator.vibrate(80); // اهتزاز بسيط لو الجهاز بيدعمه
-    setTimeout(() => {
-      readerEl.classList.remove('captured');
-      flashEl.classList.remove('active');
-    }, 400);
   }
 
   async function onScanSuccess(decodedText) {
@@ -205,18 +152,11 @@
     lastScanned = decodedText;
     lastScanTime = now;
     isProcessing = true;
-
-    // Capture فوري + إيقاف الكاميرا مؤقت عشان مايكررش القراءة وهو لسه واقف قدامها
-    captureFeedback();
-    if (html5QrCode) {
-      try { await html5QrCode.pause(true); } catch (e) { /* تجاهل لو مش قادر يوقف */ }
-    }
-
     showResult('جاري التسجيل...', '');
 
     if (WEB_APP_URL.includes('PASTE_YOUR')) {
       showResult('❌ لازم تحط رابط الـ Apps Script الأول', 'error');
-      resumeScanning();
+      isProcessing = false;
       return;
     }
 
@@ -237,20 +177,11 @@
     } catch (err) {
       showResult('❌ فشل الاتصال بالسيرفر، تأكد من النت', 'error');
     } finally {
-      resumeScanning();
+      setTimeout(() => { isProcessing = false; }, 1200);
     }
   }
 
-  function resumeScanning() {
-    setTimeout(() => {
-      isProcessing = false;
-      if (html5QrCode) {
-        try { html5QrCode.resume(); } catch (e) { /* تجاهل */ }
-      }
-    }, 1200);
-  }
-
-  html5QrCode = new Html5Qrcode('reader');
+  const html5QrCode = new Html5Qrcode('reader');
   html5QrCode.start(
     { facingMode: 'environment' },
     { fps: 10, qrbox: 250 },
