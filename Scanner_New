@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تسجيل حضور - Scanner</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #16213b;
+    --accent: #22c55e;
+    --error: #ef4444;
+    --warning: #f59e0b;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
+    --border: #2a3a5c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 16px 40px;
+  }
+  h1 {
+    font-size: 1.25rem;
+    margin: 4px 0 18px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 18px;
+    width: 100%;
+    max-width: 420px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.35);
+  }
+  .session-select {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .session-btn {
+    flex: 1;
+    padding: 12px 4px;
+    border-radius: 10px;
+    border: 2px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+  .session-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #06210f;
+  }
+  #reader {
+    width: 100%;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 3px solid var(--border);
+    transition: border-color .1s ease, box-shadow .1s ease;
+  }
+  #reader.captured {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px rgba(34,197,94,0.25);
+  }
+  .flash-overlay {
+    position: fixed;
+    inset: 0;
+    background: white;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 999;
+  }
+  .flash-overlay.active {
+    animation: flashAnim .25s ease-out;
+  }
+  @keyframes flashAnim {
+    0% { opacity: 0.6; }
+    100% { opacity: 0; }
+  }
+  .result {
+    margin-top: 14px;
+    padding: 16px;
+    border-radius: 12px;
+    text-align: center;
+    font-weight: 700;
+    min-height: 22px;
+    background: #0d1730;
+    color: var(--muted);
+    transition: all .15s ease;
+  }
+  .result.success { background: rgba(34,197,94,0.15); color: var(--accent); }
+  .result.error { background: rgba(239,68,68,0.15); color: var(--error); }
+  .result.duplicate { background: rgba(245,158,11,0.15); color: var(--warning); }
+  .hint {
+    font-size: 0.75rem;
+    color: var(--muted);
+    margin-top: 16px;
+    text-align: center;
+    line-height: 1.6;
+  }
+  code { background: #0d1730; padding: 1px 5px; border-radius: 5px; }
+</style>
+</head>
+<body>
+  <div class="flash-overlay" id="flashOverlay"></div>
+  <h1>📋 تسجيل حضور المحاضرات</h1>
+  <div class="card">
+    <div class="session-select" id="sessionSelect">
+      <button class="session-btn" data-session="1">الجلسة 1</button>
+      <button class="session-btn" data-session="2">الجلسة 2</button>
+      <button class="session-btn" data-session="3">الجلسة 3</button>
+    </div>
+    <div id="reader"></div>
+    <div class="result" id="result">وجّه الكاميرا على QR الطالب</div>
+  </div>
+  <div class="hint">
+    لو الكاميرا مش شغالة، افتح الصفحة عن طريق رابط <code>https</code> (مش <code>file://</code>).<br>
+    تقدر تفتح نفس اللينك ده على أي عدد أجهزة في نفس الوقت، كلهم هيكتبوا في نفس الـ Sheet.
+  </div>
+
+<script>
+  // ⚠️ حط هنا الرابط بتاع الـ Apps Script Web App اللي ناخده بعد الـ Deploy
+  const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxuIfjMpBYMozBondoXq10R-CkO1tq3-c4xwixqkh9NXvEVdYXpvCDb7NaBGZU5i2mU9Q/exec';
+
+  let currentSession = String(getDefaultSession());
+  const buttons = document.querySelectorAll('.session-btn');
+  buttons.forEach(btn => {
+    if (btn.dataset.session === currentSession) btn.classList.add('active');
+    btn.addEventListener('click', () => {
+      buttons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentSession = btn.dataset.session;
+    });
+  });
+
+  function getDefaultSession() {
+    const hour = new Date().getHours();
+    if (hour < 11) return 1;
+    if (hour < 14) return 2;
+    return 3;
+  }
+
+  const resultEl = document.getElementById('result');
+  const readerEl = document.getElementById('reader');
+  const flashEl = document.getElementById('flashOverlay');
+  let isProcessing = false;
+  let lastScanned = null;
+  let lastScanTime = 0;
+  let html5QrCode; // معرّف فوق عشان دوال الـ Capture تقدر توقف/تشغل الكاميرا
+
+  function showResult(text, type) {
+    resultEl.textContent = text;
+    resultEl.className = 'result ' + type;
+  }
+
+  // Audio Context واحد بس بيتعمل مرة عند أول استخدام ويتعاد استخدامه، بدل ما نعمل واحد جديد كل Scan
+  // (عمل Context جديد كل مرة كان بيتراكم في الذاكرة وبيسبب هنج بعد كام Scan متتالي)
+  let audioCtx = null;
+
+  function playBeep() {
+    try {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.15);
+    } catch (e) { /* لو المتصفح مانع الصوت، تجاهل بهدوء */ }
+  }
+
+  // بيحصل فورًا لحظة ما الكاميرا تمسك QR - قبل حتى ما نستنى رد السيرفر
+  function captureFeedback() {
+    playBeep();
+    readerEl.classList.add('captured');
+    flashEl.classList.add('active');
+    if (navigator.vibrate) navigator.vibrate(80); // اهتزاز بسيط لو الجهاز بيدعمه
+    setTimeout(() => {
+      readerEl.classList.remove('captured');
+      flashEl.classList.remove('active');
+    }, 400);
+  }
+
+  async function onScanSuccess(decodedText) {
+    const now = Date.now();
+    if (isProcessing) return;
+    // امنع نفس الكود يتبعت مرتين في أقل من 4 ثواني (لو الكاميرا لسه شايفة نفس الـ QR)
+    if (decodedText === lastScanned && (now - lastScanTime) < 4000) return;
+    lastScanned = decodedText;
+    lastScanTime = now;
+    isProcessing = true;
+
+    // Capture فوري + إيقاف الكاميرا مؤقت عشان مايكررش القراءة وهو لسه واقف قدامها
+    captureFeedback();
+    if (html5QrCode) {
+      try { await html5QrCode.pause(true); } catch (e) { /* تجاهل لو مش قادر يوقف */ }
+    }
+
+    showResult('جاري التسجيل...', '');
+
+    if (WEB_APP_URL.includes('PASTE_YOUR')) {
+      showResult('❌ لازم تحط رابط الـ Apps Script الأول', 'error');
+      resumeScanning();
+      return;
+    }
+
+    try {
+      const response = await fetch(WEB_APP_URL, {
+        method: 'POST',
+        body: JSON.stringify({ studentId: decodedText, session: currentSession })
+      });
+      const data = await response.json();
+
+      if (data.status === 'success') {
+        showResult('✅ ' + data.studentName + ' - تم التسجيل', 'success');
+      } else if (data.status === 'duplicate') {
+        showResult('⚠️ ' + data.message, 'duplicate');
+      } else {
+        showResult('❌ ' + data.message, 'error');
+      }
+    } catch (err) {
+      showResult('❌ فشل الاتصال بالسيرفر، تأكد من النت', 'error');
+    } finally {
+      resumeScanning();
+    }
+  }
+
+  function resumeScanning() {
+    setTimeout(() => {
+      isProcessing = false;
+      if (html5QrCode) {
+        try { html5QrCode.resume(); } catch (e) { /* تجاهل */ }
+      }
+    }, 700);
+  }
+
+  html5QrCode = new Html5Qrcode('reader');
+  html5QrCode.start(
+    { facingMode: 'environment' },
+    { fps: 10, qrbox: 250 },
+    onScanSuccess
+  ).catch(err => {
+    showResult('❌ مش قادر أفتح الكاميرا: ' + err, 'error');
+  });
+</script>
+</body>
+</html>
