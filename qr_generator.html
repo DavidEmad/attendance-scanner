@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>توليد QR Codes للطلاب</title>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<script src="https://unpkg.com/docx@8.5.0/build/index.js"></script>
 <style>
   :root {
     --bg: #f4f6fb;
@@ -105,6 +105,234 @@
         <button onclick="exportToWord()" style="background:#1d4ed8;">📄 تصدير Word للطباعة</button>
       </div>
       <div class="status-msg" id="statusMsg"></div>
+    </div>
+
+    <div class="grid" id="grid"></div>
+  </div>
+
+<script>
+  function generateCodes() {
+    const raw = document.getElementById('studentInput').value.trim();
+    const grid = document.getElementById('grid');
+    grid.innerHTML = '';
+
+    if (!raw) return;
+
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+
+    lines.forEach(line => {
+      const parts = line.split(',');
+      if (parts.length < 2) return;
+      const id = parts[0].trim();
+      const name = parts.slice(1).join(',').trim();
+
+      const card = document.createElement('div');
+      card.className = 'qr-card';
+
+      const qrBox = document.createElement('div');
+      qrBox.className = 'qr-box';
+      card.appendChild(qrBox);
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'name';
+      nameEl.textContent = name;
+      card.appendChild(nameEl);
+
+      const idEl = document.createElement('div');
+      idEl.className = 'id';
+      idEl.textContent = 'ID: ' + id;
+      card.appendChild(idEl);
+
+      const downloadBtn = document.createElement('button');
+      downloadBtn.className = 'download-btn';
+      downloadBtn.textContent = '⬇️ تحميل';
+      downloadBtn.onclick = () => downloadQR(qrBox, name, id);
+      card.appendChild(downloadBtn);
+
+      grid.appendChild(card);
+
+      new QRCode(qrBox, {
+        text: id,
+        width: 140,
+        height: 140
+      });
+    });
+  }
+
+  // بيحول أي حرف ممنوع في أسماء الملفات لـ "_"
+  function sanitizeFilename(str) {
+    return str.replace(/[\\/:*?"<>|]/g, '').trim().replace(/\s+/g, '_');
+  }
+
+  // بيرجع Canvas جديد فيه خلفية بيضا صريحة (Opaque) + هامش أبيض (Quiet Zone) حوالين الـ QR
+  // ده أساسي عشان الكود يفضل واضح مهما كانت خلفية اللي هيتحط عليها (زي واتساب Dark Mode)
+  function withQuietZone(sourceCanvas, margin = 30) {
+    const padded = document.createElement('canvas');
+    padded.width = sourceCanvas.width + margin * 2;
+    padded.height = sourceCanvas.height + margin * 2;
+    const ctx = padded.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, padded.width, padded.height);
+    ctx.drawImage(sourceCanvas, margin, margin);
+    return padded;
+  }
+
+  function downloadQR(qrBox, name, id) {
+    // qrcodejs بيعمل canvas جوه الـ div، وده اللي هنحوله لصورة
+    const canvas = qrBox.querySelector('canvas');
+    if (!canvas) {
+      alert('لسه الـ QR مش جاهز');
+      return;
+    }
+    const paddedCanvas = withQuietZone(canvas);
+    const filename = sanitizeFilename(name) + '_' + sanitizeFilename(id) + '.png';
+    const link = document.createElement('a');
+    link.download = filename;
+    link.href = paddedCanvas.toDataURL('image/png');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  function downloadAll() {
+    const cards = document.querySelectorAll('.qr-card');
+    if (!cards.length) {
+      alert('اعمل توليد QR Codes الأول');
+      return;
+    }
+    // تأخير بسيط بين كل تحميل عشان المتصفح ميحظرش التحميلات المتتالية
+    cards.forEach((card, i) => {
+      setTimeout(() => {
+        const qrBox = card.querySelector('.qr-box');
+        const name = card.querySelector('.name').textContent;
+        const id = card.querySelector('.id').textContent.replace('ID: ', '');
+        downloadQR(qrBox, name, id);
+      }, i * 300);
+    });
+  }
+
+  function setStatus(msg) {
+    document.getElementById('statusMsg').textContent = msg;
+  }
+
+  // ---- استيراد من ملف نصي (txt / csv) ----
+  function handleFileImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      document.getElementById('studentInput').value = e.target.result.trim();
+      setStatus('تم استيراد الملف: ' + file.name);
+      generateCodes();
+    };
+    reader.onerror = () => setStatus('❌ مش قادر أقرأ الملف');
+    reader.readAsText(file, 'UTF-8');
+    event.target.value = ''; // عشان لو استوردت نفس الملف تاني يشتغل تاني
+  }
+
+  // ---- تصدير Word فيه كل الـ QR Codes مرتبة جنب بعض للطباعة والقص ----
+  async function exportToWord() {
+    const cards = document.querySelectorAll('.qr-card');
+    if (!cards.length) {
+      alert('اعمل توليد QR Codes الأول');
+      return;
+    }
+    if (typeof docx === 'undefined') {
+      alert('مكتبة Word مش محملة، تأكد إنك متصل بالنت وجرب تاني');
+      return;
+    }
+
+    setStatus('جاري إنشاء ملف Word...');
+
+    const {
+      Document, Packer, Table, TableRow, TableCell, Paragraph, TextRun,
+      ImageRun, WidthType, AlignmentType, BorderStyle, VerticalAlign
+    } = docx;
+
+    const COLS = 4; // عدد الأعمدة في الجدول - غيّرها لو عايز أكبر/أصغر
+    const rows = [];
+    let currentRowCells = [];
+
+    function dataUrlToBytes(dataUrl) {
+      const base64 = dataUrl.split(',')[1];
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let j = 0; j < binary.length; j++) bytes[j] = binary.charCodeAt(j);
+      return bytes;
+    }
+
+    const dashedBorder = { style: BorderStyle.DASHED, size: 4, color: '999999' };
+
+    function emptyCell() {
+      return new TableCell({
+        children: [new Paragraph('')],
+        borders: { top: dashedBorder, bottom: dashedBorder, left: dashedBorder, right: dashedBorder }
+      });
+    }
+
+    cards.forEach((card, i) => {
+      const canvas = card.querySelector('canvas');
+      const name = card.querySelector('.name').textContent;
+      const id = card.querySelector('.id').textContent.replace('ID: ', '');
+      const paddedCanvas = withQuietZone(canvas, 16); // هامش أصغر هنا لأن المقاس في الجدول محدود أصلاً
+      const bytes = dataUrlToBytes(paddedCanvas.toDataURL('image/png'));
+
+      const cell = new TableCell({
+        children: [
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [ new ImageRun({ data: bytes, transformation: { width: 110, height: 110 } }) ]
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 60 },
+            children: [ new TextRun({ text: name, bold: true, size: 20 }) ]
+          }),
+          new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [ new TextRun({ text: 'ID: ' + id, size: 16, color: '666666' }) ]
+          })
+        ],
+        verticalAlign: VerticalAlign.CENTER,
+        margins: { top: 150, bottom: 150, left: 100, right: 100 },
+        borders: { top: dashedBorder, bottom: dashedBorder, left: dashedBorder, right: dashedBorder }
+      });
+
+      currentRowCells.push(cell);
+
+      if (currentRowCells.length === COLS || i === cards.length - 1) {
+        while (currentRowCells.length < COLS) currentRowCells.push(emptyCell());
+        rows.push(new TableRow({ children: currentRowCells }));
+        currentRowCells = [];
+      }
+    });
+
+    const table = new Table({
+      rows: rows,
+      width: { size: 100, type: WidthType.PERCENTAGE }
+    });
+
+    const doc = new Document({
+      sections: [{ properties: {}, children: [table] }]
+    });
+
+    try {
+      const blob = await Packer.toBlob(doc);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'qr_codes.docx';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setStatus('✅ تم تحميل ملف Word');
+    } catch (err) {
+      setStatus('❌ حصل خطأ أثناء إنشاء الملف: ' + err.message);
+    }
+  }
+</script>
+</body>
+</html>
     </div>
 
     <div class="grid" id="grid"></div>
